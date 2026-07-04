@@ -1,34 +1,31 @@
 #!/usr/bin/env python3
 """
 qwen_api_agent.py — same agent as qwen_agent.py, but talks to Qwen over the
-network via Alibaba's DashScope API instead of running locally through
-Ollama. Use this if your laptop can't download Ollama + the model in time,
-or if you'd rather demo against the real hosted models.
+network via a hosted API instead of running locally through Ollama. Use this
+if your laptop can't download Ollama + the model in time, or your DashScope
+account is stuck pending activation.
 
-Uses the official OpenAI-compatible endpoint, so it's the standard
-"OpenAI SDK, swap base_url and api_key" pattern Alibaba documents.
+Defaults to OpenRouter, which needs no purchase/activation step and offers
+Qwen3 Coder free with tool-calling support. DashScope is available as an
+alternative via --provider dashscope.
 
-SETUP
-    1. Get a DashScope API key: https://bailian.console.alibabacloud.com
-       (Model Studio) -> API Keys -> Create API key.
-       New accounts get a free token quota valid 90 days, no card required,
-       on the International (Singapore) endpoint.
-    2. Install the client:  pip install openai
-    3. Set your key:        export DASHSCOPE_API_KEY="sk-..."
-       (or pass --api-key on the command line)
+SETUP (OpenRouter — default, recommended if DashScope access is delayed)
+    1. Sign up free at https://openrouter.ai (no card required)
+    2. Create a key: openrouter.ai -> Keys -> Create Key
+    3. Install the client:  pip install openai python-dotenv
+    4. Put it in a .env file next to this script:
+           OPENROUTER_API_KEY=sk-or-v1-...
+
+SETUP (DashScope — alternative)
+    1. Get a key: https://bailian.console.alibabacloud.com -> API Keys
+       (new accounts get a free 90-day quota; some models need a one-click
+       activation step in the Model Square even on the free tier)
+    2. Put it in .env:  DASHSCOPE_API_KEY=sk-...
 
 USAGE
     python qwen_api_agent.py --check
     python qwen_api_agent.py "Is the payments migration still at risk?"
-    python qwen_api_agent.py --model qwen-flash "What's 18/50 as a percentage?"
-
-NOTES
-    - Default model is qwen-plus (good balance of quality/cost/tool-calling).
-      qwen-flash is cheaper and faster if you're rate-limited or budget-tight;
-      qwen-max is the strongest if you want the flagship for a hero question.
-    - Uses the International (Singapore) endpoint by default. If your key was
-      issued in the Beijing region, pass --base-url with the China endpoint
-      (see --help).
+    python qwen_api_agent.py --provider dashscope --model qwen-plus "..."
 """
 
 import argparse
@@ -46,8 +43,22 @@ try:
 except ImportError:
     _DOTENV_AVAILABLE = False
 
-DEFAULT_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-DEFAULT_MODEL = "qwen-plus"
+PROVIDERS = {
+    "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "default_model": "qwen/qwen3-coder:free",
+        "env_key": "OPENROUTER_API_KEY",
+        "signup_hint": "Get a free key at https://openrouter.ai (no card required, no activation step).",
+    },
+    "dashscope": {
+        "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "default_model": "qwen-plus",
+        "env_key": "DASHSCOPE_API_KEY",
+        "signup_hint": "Get a key at https://bailian.console.alibabacloud.com "
+                        "(may need per-model activation in the Model Square).",
+    },
+}
+DEFAULT_PROVIDER = "openrouter"
 NOTES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sample_notes")
 MAX_TOOL_ITERATIONS = 5
 MAX_FILE_CHARS = 6000
@@ -223,23 +234,32 @@ def check_dotenv_installed():
         )
 
 
-def get_api_key(cli_key):
-    key = cli_key or os.environ.get("DASHSCOPE_API_KEY")
+def get_api_key(cli_key, provider):
+    env_key = PROVIDERS[provider]["env_key"]
+    key = cli_key or os.environ.get(env_key)
     if not key:
         die(
-            "No DashScope API key found.",
-            "Add DASHSCOPE_API_KEY=sk-... to a .env file next to this script "
-            "(or export it, or pass --api-key).",
+            f"No {provider} API key found.",
+            f"Add {env_key}=... to a .env file next to this script "
+            f"(or export it, or pass --api-key). {PROVIDERS[provider]['signup_hint']}",
         )
     return key
 
 
-def make_client(api_key, base_url):
+def make_client(api_key, base_url, provider):
     from openai import OpenAI
-    return OpenAI(api_key=api_key, base_url=base_url)
+    headers = {}
+    if provider == "openrouter":
+        # Optional but recommended by OpenRouter for their public leaderboards;
+        # harmless either way, just identifies the app making the request.
+        headers = {
+            "HTTP-Referer": "https://github.com/build-with-qwen-demo",
+            "X-Title": "Build with Qwen Workshop Demo",
+        }
+    return OpenAI(api_key=api_key, base_url=base_url, default_headers=headers)
 
 
-def run_check(model, api_key, base_url):
+def run_check(model, api_key, base_url, provider):
     print(color("Checking setup...", DIM))
     check_openai_installed()
     print(color("  ✓ openai package installed", GREEN))
@@ -251,10 +271,10 @@ def run_check(model, api_key, base_url):
                      "only OS env vars / --api-key will work", "\033[33m"))
         print(color("     → Run: pip install python-dotenv", DIM))
 
-    get_api_key(api_key)
+    key = get_api_key(api_key, provider)
     print(color("  ✓ API key found", GREEN))
 
-    client = make_client(get_api_key(api_key), base_url)
+    client = make_client(key, base_url, provider)
     try:
         client.chat.completions.create(
             model=model,
@@ -265,16 +285,22 @@ def run_check(model, api_key, base_url):
         msg = str(e)
         if "401" in msg or "Unauthorized" in msg or "invalid" in msg.lower():
             die("API key was rejected.", "Double-check it was copied correctly and hasn't expired.")
+        elif "403" in msg or "AccessDenied" in msg:
+            die(
+                f"Access denied for model '{model}' on {provider}.",
+                f"{PROVIDERS[provider]['signup_hint']} Or try --provider "
+                f"{'dashscope' if provider == 'openrouter' else 'openrouter'} instead.",
+            )
         elif "Connection" in msg or "timeout" in msg.lower():
             die(
-                "Can't reach the DashScope API.",
-                "Check your internet connection, or that your network allows HTTPS to aliyuncs.com.",
+                f"Can't reach the {provider} API.",
+                "Check your internet connection, or that your network allows the required HTTPS domain.",
             )
         else:
-            die("The test call to DashScope failed.", f"Details: {msg}")
+            die(f"The test call to {provider} failed.", f"Details: {msg}")
         return
 
-    print(color(f"  ✓ Reached DashScope, model '{model}' responded", GREEN))
+    print(color(f"  ✓ Reached {provider}, model '{model}' responded", GREEN))
     print(color(f"  ✓ {len(glob.glob(os.path.join(NOTES_DIR, '*.md')))} sample note(s) found", GREEN))
     print(color("\nAll good — ready to demo.\n", BOLD))
 
@@ -403,30 +429,37 @@ def run_agent(client, model, user_question):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="A Qwen agent using the DashScope API (network fallback for qwen_agent.py).")
-    parser.add_argument("question", nargs="?", help="Question for the agent")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Qwen model name (default: {DEFAULT_MODEL})")
-    parser.add_argument("--api-key", default=None, help="DashScope API key (defaults to $DASHSCOPE_API_KEY)")
-    parser.add_argument(
-        "--base-url", default=DEFAULT_BASE_URL,
-        help=f"API base URL (default: International/Singapore — {DEFAULT_BASE_URL}). "
-             f"Use https://dashscope.aliyuncs.com/compatible-mode/v1 for the Beijing region.",
+    parser = argparse.ArgumentParser(
+        description="A Qwen agent using a hosted API (OpenRouter by default, DashScope as an alternative) "
+                     "— network fallback for qwen_agent.py."
     )
+    parser.add_argument("question", nargs="?", help="Question for the agent")
+    parser.add_argument(
+        "--provider", choices=list(PROVIDERS.keys()), default=DEFAULT_PROVIDER,
+        help=f"Which API to use (default: {DEFAULT_PROVIDER})",
+    )
+    parser.add_argument("--model", default=None, help="Model name (defaults to the provider's recommended free/cheap model)")
+    parser.add_argument("--api-key", default=None, help="API key (defaults to the provider's env var, e.g. $OPENROUTER_API_KEY)")
+    parser.add_argument("--base-url", default=None, help="Override the API base URL (defaults to the provider's standard endpoint)")
     parser.add_argument("--check", action="store_true", help="Verify setup, then exit")
     args = parser.parse_args()
 
     check_openai_installed()
 
+    provider_config = PROVIDERS[args.provider]
+    model = args.model or provider_config["default_model"]
+    base_url = args.base_url or provider_config["base_url"]
+
     if args.check:
-        run_check(args.model, args.api_key, args.base_url)
+        run_check(model, args.api_key, base_url, args.provider)
         return
 
     if not args.question:
         parser.error("question is required unless you pass --check")
 
-    api_key = get_api_key(args.api_key)
-    client = make_client(api_key, args.base_url)
-    run_agent(client, args.model, args.question)
+    api_key = get_api_key(args.api_key, args.provider)
+    client = make_client(api_key, base_url, args.provider)
+    run_agent(client, model, args.question)
 
 
 if __name__ == "__main__":
