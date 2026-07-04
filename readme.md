@@ -55,18 +55,21 @@ All good — ready to demo.
 
 ## Setup — API version (`qwen_api_agent.py`, for laptops that can't run Ollama)
 
+Uses **OpenRouter by default** — free, no purchase or activation step, works
+immediately after signup. DashScope is available as a fallback provider if
+you'd rather use it (`--provider dashscope`), but some models there need a
+manual activation step in the Model Square even on the free tier.
+
 ```bash
 # 1. Install the dependencies
 pip install openai python-dotenv
 
-# 2. Get a DashScope API key
-#    https://bailian.console.alibabacloud.com -> API Keys -> Create API key
-#    New accounts get a free token quota, valid 90 days, no card required
-#    (International/Singapore endpoint).
+# 2. Get a free OpenRouter API key
+#    https://openrouter.ai -> sign up (no card required) -> Keys -> Create Key
 
 # 3. Copy the template and add your key
 cp .env.example .env
-# then edit .env and set: DASHSCOPE_API_KEY=sk-your-real-key
+# then edit .env and set: OPENROUTER_API_KEY=sk-or-v1-your-real-key
 
 # 4. Verify everything works
 python qwen_api_agent.py --check
@@ -78,10 +81,16 @@ Checking setup...
   ✓ openai package installed
   ✓ python-dotenv installed (.env file will be read)
   ✓ API key found
-  ✓ Reached DashScope, model 'qwen-plus' responded
+  ✓ Reached openrouter, model 'qwen/qwen3-coder:free' responded
   ✓ 3 sample note(s) found
 
 All good — ready to demo.
+```
+
+**To use DashScope instead:**
+```bash
+# in .env: DASHSCOPE_API_KEY=sk-your-key
+python qwen_api_agent.py --provider dashscope --check
 ```
 
 **Never commit your real `.env` file** — it holds your live API key. If this
@@ -96,9 +105,9 @@ python qwen_agent.py "Is the payments migration still at risk?"
 python qwen_agent.py --think "What's 18 out of 50 as a percentage, and what does that mean for the beta pilot?"
 python qwen_agent.py --model qwen3:8b "Who's responsible for Swahili localization?"
 
-# API (DashScope) version — same questions, same behavior
+# API version (OpenRouter by default)
 python qwen_api_agent.py "Is the payments migration still at risk?"
-python qwen_api_agent.py --model qwen-flash "What's 18/50 as a percentage?"
+python qwen_api_agent.py --provider dashscope --model qwen-plus "What's 18/50 as a percentage?"
 ```
 
 ## Available tools
@@ -128,10 +137,11 @@ These are picked so the agent has to actually choose the right tool, not just an
 | `ollama package isn't installed` | Run `pip install ollama` |
 | Model doesn't call the right tool | Try `qwen3:8b` if available — better tool-calling judgment than the 4B model |
 | Agent loops without answering | It hit the 5-step safety limit — ask a simpler question |
-| `No DashScope API key found` | Copy `.env.example` to `.env` and add your real key |
+| `No DashScope API key found` / `No openrouter API key found` | Copy `.env.example` to `.env` and add your real key |
 | `python-dotenv not installed` | Run `pip install python-dotenv` — otherwise `.env` is ignored |
 | `API key was rejected` | Check for a typo/extra space, or that the key hasn't expired |
-| `Can't reach the DashScope API` | Check internet access, or that the venue network allows `aliyuncs.com` |
+| `Can't reach the {provider} API` | Check internet access, or that the venue network allows the provider's domain |
+| `403 AccessDenied.Unpurchased` (DashScope) | The model needs activation in Model Studio's Model Square — or just switch to `--provider openrouter` |
 
 ## After the workshop: switching to the hosted API
 
