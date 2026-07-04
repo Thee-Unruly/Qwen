@@ -39,6 +39,13 @@ import operator
 import os
 import sys
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # reads .env in the current directory (if present) into os.environ
+    _DOTENV_AVAILABLE = True
+except ImportError:
+    _DOTENV_AVAILABLE = False
+
 DEFAULT_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 DEFAULT_MODEL = "qwen-plus"
 NOTES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sample_notes")
@@ -208,12 +215,21 @@ def check_openai_installed():
         die("The 'openai' Python package isn't installed.", "Run: pip install openai")
 
 
+def check_dotenv_installed():
+    if not _DOTENV_AVAILABLE:
+        die(
+            "The 'python-dotenv' package isn't installed.",
+            "Run: pip install python-dotenv   (needed to read the .env file)",
+        )
+
+
 def get_api_key(cli_key):
     key = cli_key or os.environ.get("DASHSCOPE_API_KEY")
     if not key:
         die(
             "No DashScope API key found.",
-            "Set it with: export DASHSCOPE_API_KEY='sk-...'  or pass --api-key",
+            "Add DASHSCOPE_API_KEY=sk-... to a .env file next to this script "
+            "(or export it, or pass --api-key).",
         )
     return key
 
@@ -227,6 +243,14 @@ def run_check(model, api_key, base_url):
     print(color("Checking setup...", DIM))
     check_openai_installed()
     print(color("  ✓ openai package installed", GREEN))
+
+    if _DOTENV_AVAILABLE:
+        print(color("  ✓ python-dotenv installed (.env file will be read)", GREEN))
+    else:
+        print(color("  ⚠ python-dotenv not installed — .env file will be ignored, "
+                     "only OS env vars / --api-key will work", "\033[33m"))
+        print(color("     → Run: pip install python-dotenv", DIM))
+
     get_api_key(api_key)
     print(color("  ✓ API key found", GREEN))
 
