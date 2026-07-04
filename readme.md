@@ -1,14 +1,104 @@
+# Qwen Local Agent Demo
+
+A local AI agent powered by Qwen3 (via Ollama) that can reason about which
+tool it needs, call it, read the result, and give a final answer — live,
+streaming, fully offline. No API key required.
+
+Built for the "Build with Qwen" workshop demo.
+
+## Why this exists
+
+Most AI demos are just "type a prompt, get an answer." This one shows the
+model actually *deciding* what to do — check a calculator, search some notes,
+read a file — before it answers. That decision loop is what people mean by
+an "AI agent," and it's the part worth watching, not just the final text.
+
+It also works with zero dependency on API access or venue Wi-Fi, since
+everything runs locally through Ollama.
+
+## What's included
+
+| File | What it does |
+|---|---|
+| `qwen_agent.py` | The local agent — runs via Ollama, no API key needed |
+| `qwen_api_agent.py` | Same agent, but calls Qwen over the DashScope API instead — use this if Ollama won't install on someone's laptop |
+| `.env.example` | Template for your DashScope API key — copy to `.env` and fill in |
+| `sample_notes/roadmap.md` | Sample "company" data for the agent to search |
+| `sample_notes/meeting_notes.md` | Sample "company" data for the agent to search |
+| `sample_notes/customer_feedback.md` | Sample "company" data for the agent to search |
+
+## Setup — local version (`qwen_agent.py`, works offline)
+
+```bash
+# 1. Install Ollama
+#    https://ollama.com/download
+
+# 2. Pull the model (a few GB — do this on good Wi-Fi tonight)
+ollama pull qwen3:4b
+
+# 3. Install the Python client
+pip install ollama
+
+# 4. Verify everything works
+python qwen_agent.py --check
+```
+
+You should see:
+```
+Checking setup...
+  ✓ ollama package installed
+  ✓ Ollama running, 'qwen3:4b' available
+  ✓ 3 sample note(s) found
+
+All good — ready to demo.
+```
+
+## Setup — API version (`qwen_api_agent.py`, for laptops that can't run Ollama)
+
+```bash
+# 1. Install the dependencies
+pip install openai python-dotenv
+
+# 2. Get a DashScope API key
+#    https://bailian.console.alibabacloud.com -> API Keys -> Create API key
+#    New accounts get a free token quota, valid 90 days, no card required
+#    (International/Singapore endpoint).
+
+# 3. Copy the template and add your key
+cp .env.example .env
+# then edit .env and set: DASHSCOPE_API_KEY=sk-your-real-key
+
+# 4. Verify everything works
+python qwen_api_agent.py --check
+```
+
+You should see:
+```
+Checking setup...
+  ✓ openai package installed
+  ✓ python-dotenv installed (.env file will be read)
+  ✓ API key found
+  ✓ Reached DashScope, model 'qwen-plus' responded
+  ✓ 3 sample note(s) found
+
+All good — ready to demo.
+```
+
+**Never commit your real `.env` file** — it holds your live API key. If this
+folder ever becomes a git repo, add `.env` to `.gitignore` (keep `.env.example`,
+which has no real key, tracked instead).
+
 ## Usage
 
 ```bash
-# Quick tool-use demo
+# Local (Ollama) version
 python qwen_agent.py "Is the payments migration still at risk?"
-
-# Show the model's reasoning trace before it answers (slower, more impressive)
 python qwen_agent.py --think "What's 18 out of 50 as a percentage, and what does that mean for the beta pilot?"
-
-# Use a bigger local model if you pre-downloaded one
 python qwen_agent.py --model qwen3:8b "Who's responsible for Swahili localization?"
+
+# API (DashScope) version — same questions, same behavior
+python qwen_api_agent.py "Is the payments migration still at risk?"
+python qwen_api_agent.py --model qwen-flash "What's 18/50 as a percentage?"
 ```
 
 ## Available tools
@@ -38,6 +128,10 @@ These are picked so the agent has to actually choose the right tool, not just an
 | `ollama package isn't installed` | Run `pip install ollama` |
 | Model doesn't call the right tool | Try `qwen3:8b` if available — better tool-calling judgment than the 4B model |
 | Agent loops without answering | It hit the 5-step safety limit — ask a simpler question |
+| `No DashScope API key found` | Copy `.env.example` to `.env` and add your real key |
+| `python-dotenv not installed` | Run `pip install python-dotenv` — otherwise `.env` is ignored |
+| `API key was rejected` | Check for a typo/extra space, or that the key hasn't expired |
+| `Can't reach the DashScope API` | Check internet access, or that the venue network allows `aliyuncs.com` |
 
 ## After the workshop: switching to the hosted API
 
