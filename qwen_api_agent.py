@@ -34,7 +34,9 @@ import glob
 import json
 import operator
 import os
+import re
 import sys
+import time
 
 try:
     from dotenv import load_dotenv
@@ -61,6 +63,7 @@ PROVIDERS = {
 DEFAULT_PROVIDER = "openrouter"
 NOTES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sample_notes")
 MAX_TOOL_ITERATIONS = 5
+MAX_RATE_LIMIT_RETRIES = 4
 MAX_FILE_CHARS = 6000
 
 RESET = "\033[0m"
@@ -310,17 +313,59 @@ def run_check(model, api_key, base_url, provider):
 # standard OpenAI streaming pattern, and prints content live as it arrives.
 # ---------------------------------------------------------------------------
 
+def _extract_retry_after(error_text):
+    """Pull a suggested wait time out of a 429 error message, if present."""
+    match = re.search(r"retry_after_seconds['\"]?:\s*(\d+(?:\.\d+)?)", error_text)
+    if match:
+        return float(match.group(1))
+    match = re.search(r"Retry-After['\"]?:\s*['\"]?(\d+(?:\.\d+)?)", error_text)
+    if match:
+        return float(match.group(1))
+    return None
+
+
+def create_stream_with_retry(client, model, messages):
+    """Creates the streaming completion, automatically retrying on 429s —
+    free-tier models on OpenRouter get temporarily overloaded upstream
+    sometimes, and this is genuinely recoverable a few seconds later."""
+    last_error = None
+    for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
+        try:
+            return client.chat.completions.create(
+                model=model, messages=messages, tools=TOOL_SCHEMAS, stream=True,
+            )
+        except Exception as e:
+            msg = str(e)
+            is_rate_limit = "429" in msg or "rate" in msg.lower() and "limit" in msg.lower()
+            if not is_rate_limit or attempt == MAX_RATE_LIMIT_RETRIES:
+                last_error = e
+                break
+            wait_seconds = _extract_retry_after(msg) or (5 * (attempt + 1))
+            print(color(
+                f"\n  ⏳ Model is rate-limited right now, retrying in {wait_seconds:.0f}s "
+                f"(attempt {attempt + 1}/{MAX_RATE_LIMIT_RETRIES})...", "\033[33m",
+            ))
+            time.sleep(wait_seconds)
+    raise last_error
+
+
 def run_turn(client, model, messages):
     content_parts = []
     tool_calls_acc = {}  # index -> {id, name, arguments}
     content_started = False
 
     try:
-        stream = client.chat.completions.create(
-            model=model, messages=messages, tools=TOOL_SCHEMAS, stream=True,
-        )
+        stream = create_stream_with_retry(client, model, messages)
     except Exception as e:
-        die("Something went wrong talking to DashScope.", f"Details: {e}")
+        msg = str(e)
+        if "429" in msg:
+            die(
+                "Still rate-limited after several retries.",
+                "The free model is under heavy load right now. Wait a minute and try again, "
+                "or switch to a paid model / add OpenRouter credits for higher limits.",
+            )
+        else:
+            die("Something went wrong talking to the API.", f"Details: {msg}")
         return None, None
 
     try:
