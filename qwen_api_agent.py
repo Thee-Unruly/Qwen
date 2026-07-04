@@ -48,7 +48,7 @@ except ImportError:
 PROVIDERS = {
     "openrouter": {
         "base_url": "https://openrouter.ai/api/v1",
-        "default_model": "qwen/qwen3-coder:free",
+        "default_model": "qwen/qwen3-next-80b-a3b-instruct:free",
         "env_key": "OPENROUTER_API_KEY",
         "signup_hint": "Get a free key at https://openrouter.ai (no card required, no activation step).",
     },
